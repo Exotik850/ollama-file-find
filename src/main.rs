@@ -1,104 +1,15 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
-use serde::Deserialize;
 use std::{
     env, fs,
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
-#[derive(Parser, Debug)]
-#[command(
-    version,
-    about = "List locally installed Ollama models by reading the manifests directory"
-)]
-struct Args {
-    /// Emit plain text (just model names) instead of JSON
-    #[arg(long)]
-    plain: bool,
-
-    /// Include hidden tags (those beginning with '.')
-    #[arg(long)]
-    include_hidden: bool,
-
-    /// Show layer digests, sizes, total size, timestamps
-    #[arg(long)]
-    verbose: bool,
-
-    /// Include blob path resolution (implies JSON output)
-    #[arg(long)]
-    blob_paths: bool,
-
-    /// Root of models directory (overrides env + fallback)
-    #[arg(long)]
-    models_dir: Option<PathBuf>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ManifestJson {
-    #[serde(default)]
-    layers: Vec<LayerJson>,
-    #[serde(default)]
-    config: Option<LayerJson>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct LayerJson {
-    digest: String,
-    #[serde(rename = "mediaType")]
-    #[serde(default)]
-    media_type: String,
-    size: Option<u64>,
-}
-
-#[derive(Debug, serde::Serialize)]
-struct ListedModel {
-    /// Normalized display name (matches `ollama list` style)
-    name: String,
-    /// Raw components
-    host: Option<String>,
-    namespace: Option<String>,
-    model: String,
-    tag: String,
-    /// Filesystem path to manifest
-    manifest_path: String,
-    /// Layers (if verbose)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    layers: Option<Vec<LayerInfo>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    config: Option<LayerInfo>,
-    /// Total summed size (if verbose)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    total_size: Option<u64>,
-    /// Manifest mtime (if verbose)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mtime: Option<u64>,
-    /// Primary model blob path (if blob_paths)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    primary_blob_path: Option<PathBuf>,
-    /// All blob paths (if blob_paths)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    blob_paths: Option<Vec<BlobPathInfo>>,
-}
-
-#[derive(Debug, serde::Serialize, Clone)]
-struct LayerInfo {
-    digest: String,
-    media_type: String,
-    size: Option<u64>,
-}
-
-#[derive(Debug, serde::Serialize, Clone)]
-struct BlobPathInfo {
-    digest: String,
-    media_type: String,
-    declared_size: Option<u64>,
-    path: String,
-    exists: bool,
-    size_ok: Option<bool>, // Only Some if both declared & actual size available
-    actual_size: Option<u64>,
-    primary: bool,
-}
+mod args;
+use args::Args;
+mod models;
+use models::{ListedModel, ManifestJson, LayerInfo, BlobPathInfo};
 
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -136,21 +47,20 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Locate the models directory (OLLAMA_MODELS or fallback to $HOME/.ollama/models)
+/// Locate the models directory (`OLLAMA_MODELS` or fallback to $HOME/.ollama/models)
 fn resolve_models_dir(override_dir: Option<&Path>) -> PathBuf {
     if let Some(p) = override_dir {
         return p.to_path_buf();
     }
-    if let Ok(p) = env::var("OLLAMA_MODELS") {
-        if !p.is_empty() {
+    if let Ok(p) = env::var("OLLAMA_MODELS")
+        && !p.is_empty() {
             return PathBuf::from(p);
         }
-    }
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".ollama").join("models")
 }
 
-/// Scan manifests and construct ListedModel entries.
+/// Scan manifests and construct `ListedModel` entries.
 fn scan_manifests(
     root: &Path,
     blobs_root: &Path,
@@ -158,7 +68,7 @@ fn scan_manifests(
     args: &Args,
     out: &mut Vec<ListedModel>,
 ) -> Result<()> {
-    for entry in walkdir::WalkDir::new(root).follow_links(false).into_iter() {
+    for entry in walkdir::WalkDir::new(root).follow_links(false) {
         let entry = match entry {
             Ok(e) => e,
             Err(e) => {
@@ -262,12 +172,11 @@ fn scan_manifests(
                     any = true;
                 }
             }
-            if let Some(cfg) = &config {
-                if let Some(sz) = cfg.size {
+            if let Some(cfg) = &config
+                && let Some(sz) = cfg.size {
                     sum += sz;
                     any = true;
                 }
-            }
             if any { Some(sum) } else { None }
         } else {
             None
@@ -336,12 +245,11 @@ fn build_blob_infos(
     let mut max_size: u64 = 0;
 
     for l in layers {
-        if let Some(sz) = l.size {
-            if sz > max_size {
+        if let Some(sz) = l.size
+            && sz > max_size {
                 max_size = sz;
                 primary_digest = Some(l.digest.clone());
             }
-        }
     }
     // Fallback to first layer if no sizes
     if primary_digest.is_none() {
