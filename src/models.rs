@@ -20,7 +20,7 @@ pub(crate) struct LayerJson {
 }
 
 #[derive(Debug, serde::Serialize)]
-pub(crate) struct ListedModel {
+pub struct ListedModel {
     /// Normalized display name (matches `ollama list` style)
     pub name: String,
     /// Raw components
@@ -50,14 +50,14 @@ pub(crate) struct ListedModel {
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
-pub(crate) struct LayerInfo {
+pub struct LayerInfo {
     pub digest: String,
     pub media_type: String,
     pub size: Option<u64>,
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
-pub(crate) struct BlobPathInfo {
+pub struct BlobPathInfo {
     pub digest: String,
     pub media_type: String,
     pub declared_size: Option<u64>,
