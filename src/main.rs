@@ -27,9 +27,6 @@ fn main() -> Result<()> {
         blob_paths: args.blob_paths,
     })?;
 
-    // Sort for deterministic output (by display name)
-    models.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-
     if args.plain && !args.blob_paths && !args.verbose {
         for m in &models {
             println!("{}", m.name);

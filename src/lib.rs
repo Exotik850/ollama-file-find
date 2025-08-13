@@ -14,10 +14,10 @@ pub fn resolve_models_dir(override_dir: Option<&Path>) -> PathBuf {
     if let Some(p) = override_dir {
         return p.to_path_buf();
     }
-    if let Ok(p) = env::var("OLLAMA_MODELS")
-        && !p.is_empty()
-    {
-        return PathBuf::from(p);
+    if let Ok(p) = env::var("OLLAMA_MODELS") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
     }
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".ollama").join("models")
@@ -277,6 +277,7 @@ pub fn scan_manifests(
             models.push(model);
         }
     }
+    models.sort_unstable_by(|a, b| a.name.cmp(&b.name));
     Ok(models)
 }
 
@@ -291,11 +292,11 @@ pub fn build_blob_infos(
     let mut max_size: u64 = 0;
 
     for (i, l) in layers.iter().enumerate() {
-        if let Some(sz) = l.size
-            && sz > max_size
-        {
-            max_size = sz;
-            primary_digest_idx = Some(i);
+        if let Some(sz) = l.size {
+            if sz > max_size {
+                max_size = sz;
+                primary_digest_idx = Some(i);
+            }
         }
     }
 
