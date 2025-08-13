@@ -26,10 +26,224 @@ pub fn resolve_models_dir(override_dir: Option<&Path>) -> PathBuf {
 pub struct ScanArgs<'a> {
     pub root: &'a Path,
     pub blobs_root: &'a Path,
-    pub models_dir: &'a Path,
     pub include_hidden: bool,
     pub verbose: bool,
     pub blob_paths: bool,
+}
+
+fn relative_components(entry: &walkdir::DirEntry, root: &Path) -> Option<Vec<String>> {
+    let rel = entry.path().strip_prefix(root).ok()?;
+    let comps: Vec<String> = rel
+        .iter()
+        .map(|c| c.to_string_lossy().to_string())
+        .collect();
+    if comps.is_empty() {
+        return None;
+    }
+    Some(comps)
+}
+
+fn parse_components(
+    mut comps: Vec<String>,
+    include_hidden: bool,
+) -> Option<(Option<String>, Option<String>, String, String)> {
+    // Accept 4 components host/namespace/model/tag or 3 components namespace/model/tag
+    if !(comps.len() == 4 || comps.len() == 3) {
+        return None;
+    }
+
+    let tag = comps.last().unwrap();
+    if !include_hidden && tag.starts_with('.') {
+        return None;
+    }
+    if !include_hidden && comps[..comps.len() - 1].iter().any(|c| c.starts_with('.')) {
+        return None;
+    }
+
+    let (host, namespace, model, tag) = if comps.len() == 4 {
+        (
+            Some(std::mem::take(&mut comps[0])),
+            Some(std::mem::take(&mut comps[1])),
+            std::mem::take(&mut comps[2]),
+            std::mem::take(&mut comps[3]),
+        )
+    } else {
+        (
+            None,
+            Some(std::mem::take(&mut comps[0])),
+            std::mem::take(&mut comps[1]),
+            std::mem::take(&mut comps[2]),
+        )
+    };
+
+    Some((host, namespace, model, tag))
+}
+
+fn read_manifest(path: &Path) -> Option<ManifestJson> {
+    let data = match fs::read(path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Failed reading manifest {}: {e}", path.display());
+            return None;
+        }
+    };
+    match serde_json::from_slice(&data) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("Skipping invalid manifest JSON {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+fn manifest_to_layers(parsed: &ManifestJson) -> (Vec<LayerInfo>, Option<LayerInfo>) {
+    let layers: Vec<LayerInfo> = parsed
+        .layers
+        .iter()
+        .cloned()
+        .map(|l| LayerInfo {
+            digest: l.digest,
+            media_type: l.media_type,
+            size: l.size,
+        })
+        .collect();
+
+    let config = parsed.config.as_ref().map(|c| LayerInfo {
+        digest: c.digest.clone(),
+        media_type: c.media_type.clone(),
+        size: c.size,
+    });
+
+    (layers, config)
+}
+
+fn compute_total_size(layers: &[LayerInfo], config: Option<&LayerInfo>) -> Option<u64> {
+    let mut sum = 0u64;
+    let mut any = false;
+    for l in layers {
+        if let Some(sz) = l.size {
+            sum += sz;
+            any = true;
+        }
+    }
+    if let Some(cfg) = config {
+        if let Some(sz) = cfg.size {
+            sum += sz;
+            any = true;
+        }
+    }
+    if any { Some(sum) } else { None }
+}
+
+fn compute_mtime(path: &Path) -> Option<u64> {
+    fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+}
+
+fn gather_blob_info(
+    layers: &[LayerInfo],
+    config: Option<&LayerInfo>,
+    blobs_root: &Path,
+) -> (Option<PathBuf>, Vec<BlobPathInfo>) {
+    let (primary_digest, mut blob_infos) = build_blob_infos(layers, config, blobs_root);
+    let primary_blob_path = primary_digest
+        .as_ref()
+        .map(|d| digest_to_blob_path(blobs_root, d));
+    if let Some(pd) = primary_digest {
+        for bi in &mut blob_infos {
+            if bi.digest == pd {
+                bi.primary = true;
+            }
+        }
+    }
+    (primary_blob_path, blob_infos)
+}
+
+fn build_listed_model(
+    host: Option<String>,
+    namespace: Option<String>,
+    model: String,
+    tag: String,
+    manifest_path: &Path,
+    layers: Vec<LayerInfo>,
+    config: Option<LayerInfo>,
+    verbose: bool,
+    blobs_root: &Path,
+    want_blob_paths: bool,
+) -> ListedModel {
+    let display_name = normalize_name(host.as_deref(), namespace.as_deref(), &model, &tag);
+
+    let total_size = if verbose {
+        compute_total_size(&layers, config.as_ref())
+    } else {
+        None
+    };
+
+    let mtime = if verbose {
+        compute_mtime(manifest_path)
+    } else {
+        None
+    };
+
+    let (primary_blob_path, blob_paths) = if want_blob_paths || verbose {
+        gather_blob_info(&layers, config.as_ref(), blobs_root)
+    } else {
+        (None, Vec::new())
+    };
+
+    ListedModel {
+        name: display_name,
+        host,
+        namespace,
+        model,
+        tag,
+        manifest_path: manifest_path.display().to_string(),
+        layers: if verbose { Some(layers) } else { None },
+        config,
+        total_size,
+        mtime,
+        primary_blob_path,
+        blob_paths: if blob_paths.is_empty() {
+            None
+        } else {
+            Some(blob_paths)
+        },
+    }
+}
+
+fn process_entry(
+    entry: &walkdir::DirEntry,
+    root: &Path,
+    blobs_root: &Path,
+    include_hidden: bool,
+    verbose: bool,
+    want_blob_paths: bool,
+) -> Option<ListedModel> {
+    if entry.file_type().is_dir() {
+        return None;
+    }
+    let comps = relative_components(entry, root)?;
+    let (host, namespace, model, tag) = parse_components(comps, include_hidden)?;
+
+    let manifest_path = entry.path();
+    let parsed = read_manifest(manifest_path)?;
+    let (layers, config) = manifest_to_layers(&parsed);
+
+    Some(build_listed_model(
+        host,
+        namespace,
+        model,
+        tag,
+        manifest_path,
+        layers,
+        config,
+        verbose,
+        blobs_root,
+        want_blob_paths,
+    ))
 }
 
 /// Scan manifests and construct `ListedModel` entries.
@@ -37,177 +251,32 @@ pub fn scan_manifests(
     ScanArgs {
         root,
         blobs_root,
-        models_dir,
         include_hidden,
         verbose,
         blob_paths,
     }: ScanArgs,
 ) -> Result<Vec<ListedModel>> {
     let mut models = Vec::new();
-    for entry in walkdir::WalkDir::new(root).follow_links(false) {
-        let entry = match entry {
+
+    for entry_res in walkdir::WalkDir::new(root).follow_links(false) {
+        let entry = match entry_res {
             Ok(e) => e,
             Err(e) => {
                 eprintln!("Skipping entry error: {e}");
                 continue;
             }
         };
-        if entry.file_type().is_dir() {
-            continue;
-        }
-
-        let rel = match entry.path().strip_prefix(root) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        let comps: Vec<_> = rel
-            .iter()
-            .map(|c| c.to_string_lossy().to_string())
-            .collect();
-        if comps.is_empty() {
-            continue;
-        }
-
-        // Accept 4 components host/namespace/model/tag or 3 components namespace/model/tag
-        if !(comps.len() == 4 || comps.len() == 3) {
-            continue;
-        }
-
-        let tag = comps.last().unwrap();
-        if !include_hidden && tag.starts_with('.') {
-            continue;
-        }
-        if !include_hidden && comps[..comps.len() - 1].iter().any(|c| c.starts_with('.')) {
-            continue;
-        }
-
-        let (host, namespace, model, tag) = if comps.len() == 4 {
-            (
-                Some(comps[0].clone()),
-                Some(comps[1].clone()),
-                comps[2].clone(),
-                comps[3].clone(),
-            )
-        } else {
-            (
-                None,
-                Some(comps[0].clone()),
-                comps[1].clone(),
-                comps[2].clone(),
-            )
-        };
-
-        let display_name = normalize_name(host.as_deref(), namespace.as_deref(), &model, &tag);
-
-        // Read manifest JSON
-        let manifest_path = entry.path();
-        let data = match fs::read(manifest_path) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("Failed reading manifest {}: {e}", manifest_path.display());
-                continue;
-            }
-        };
-
-        let parsed: ManifestJson = match serde_json::from_slice(&data) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!(
-                    "Skipping invalid manifest JSON {}: {e}",
-                    manifest_path.display()
-                );
-                continue;
-            }
-        };
-
-        let layers: Vec<LayerInfo> = parsed
-            .layers
-            .iter()
-            .cloned()
-            .map(|l| LayerInfo {
-                digest: l.digest,
-                media_type: l.media_type,
-                size: l.size,
-            })
-            .collect();
-
-        let config = parsed.config.map(|c| LayerInfo {
-            digest: c.digest,
-            media_type: c.media_type,
-            size: c.size,
-        });
-
-        // Compute total size if verbose
-        let total_size = if verbose {
-            let mut sum = 0u64;
-            let mut any = false;
-            for l in &layers {
-                if let Some(sz) = l.size {
-                    sum += sz;
-                    any = true;
-                }
-            }
-            if let Some(cfg) = &config
-                && let Some(sz) = cfg.size
-            {
-                sum += sz;
-                any = true;
-            }
-            if any { Some(sum) } else { None }
-        } else {
-            None
-        };
-
-        let mtime = if verbose {
-            fs::metadata(manifest_path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-        } else {
-            None
-        };
-
-        // Blob paths (optional)
-        let (primary_blob_path, blob_paths) = if blob_paths {
-            let (primary_digest, mut blob_infos) =
-                build_blob_infos(&layers, config.as_ref(), blobs_root);
-
-            let primary_blob_path = primary_digest
-                .clone()
-                .map(|d| digest_to_blob_path(blobs_root, &d));
-
-            // annotate primary
-            if let Some(pd) = primary_digest {
-                for bi in &mut blob_infos {
-                    if bi.digest == pd {
-                        bi.primary = true;
-                    }
-                }
-            }
-
-            (primary_blob_path, Some(blob_infos))
-        } else {
-            (None, None)
-        };
-
-        models.push(ListedModel {
-            name: display_name,
-            host,
-            namespace,
-            model,
-            tag,
-            manifest_path: manifest_path.display().to_string(),
-            layers: if verbose { Some(layers) } else { None },
-            config,
-            total_size,
-            mtime,
-            primary_blob_path,
+        if let Some(model) = process_entry(
+            &entry,
+            root,
+            blobs_root,
+            include_hidden,
+            verbose,
             blob_paths,
-        });
+        ) {
+            models.push(model);
+        }
     }
-
     Ok(models)
 }
 
@@ -218,25 +287,21 @@ pub fn build_blob_infos(
     blobs_root: &Path,
 ) -> (Option<String>, Vec<BlobPathInfo>) {
     // Heuristic: primary = largest non-config layer with a size.
-    let mut primary_digest: Option<String> = None;
+    let mut primary_digest_idx: Option<usize> = None;
     let mut max_size: u64 = 0;
 
-    for l in layers {
+    for (i, l) in layers.iter().enumerate() {
         if let Some(sz) = l.size
             && sz > max_size
         {
             max_size = sz;
-            primary_digest = Some(l.digest.clone());
+            primary_digest_idx = Some(i);
         }
     }
-    // Fallback to first layer if no sizes
-    if primary_digest.is_none() {
-        if let Some(first) = layers.first() {
-            primary_digest = Some(first.digest.clone());
-        } else if let Some(cfg) = config {
-            primary_digest = Some(cfg.digest.clone());
-        }
-    }
+
+    let primary_digest = primary_digest_idx
+        .and_then(|i| layers.get(i).map(|l| l.digest.clone()))
+        .or_else(|| config.map(|c| c.digest.clone()));
 
     let mut out = Vec::new();
 

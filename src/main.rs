@@ -22,7 +22,6 @@ fn main() -> Result<()> {
     let mut models = scan_manifests(ScanArgs {
         root: &manifests_root,
         blobs_root: &blobs_root,
-        models_dir: &models_dir,
         include_hidden: args.include_hidden,
         verbose: args.verbose,
         blob_paths: args.blob_paths,
