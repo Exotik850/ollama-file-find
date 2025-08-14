@@ -19,7 +19,7 @@ fn main() -> Result<()> {
         );
     }
 
-    let mut models = scan_manifests(ScanArgs {
+    let models = scan_manifests(ScanArgs {
         root: &manifests_root,
         blobs_root: &blobs_root,
         include_hidden: args.include_hidden,
