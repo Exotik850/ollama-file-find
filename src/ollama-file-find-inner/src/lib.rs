@@ -140,23 +140,16 @@ fn build_listed_model(
     verbose: bool,
 ) -> ListedModel {
     let name = model_id.normalize();
-
     // Optional details only computed if requested.
-    let total_size = if verbose {
-        compute_total_size(&manifest.layers, manifest.config.as_ref())
-    } else {
-        None
-    };
-    let mtime = if verbose {
-        compute_mtime(manifest_path)
-    } else {
-        None
-    };
+    let total_size = verbose
+        .then(|| compute_total_size(&manifest.layers, manifest.config.as_ref()))
+        .flatten();
+    let mtime = verbose.then(|| compute_mtime(manifest_path)).flatten();
 
     // Blob path info (primary + list) only if either verbose or blob_paths requested.
     let (primary_blob_path, blob_paths) = if verbose {
         let (primary_digest, mut infos) =
-            build_blob_infos(&manifest.layers, manifest.config.as_ref(), blobs_root);
+            build_blob_infos(&manifest.layers, manifest.config.clone(), blobs_root);
         let primary_path = primary_digest
             .as_ref()
             .map(|d| digest_to_blob_path(blobs_root, d));
@@ -176,16 +169,8 @@ fn build_listed_model(
         name,
         model_id,
         manifest_path: manifest_path.display().to_string(),
-        layers: if verbose {
-            Some(manifest.layers.clone())
-        } else {
-            None
-        },
-        config: if verbose {
-            manifest.config.clone()
-        } else {
-            None
-        },
+        layers: verbose.then_some(manifest.layers),
+        config: verbose.then_some(manifest.config).flatten(),
         total_size,
         mtime,
         primary_blob_path,
@@ -237,7 +222,7 @@ pub fn scan_manifests(args: ScanArgs) -> Vec<ListedModel> {
 /// Primary heuristic: largest (by declared size) layer; fall back to config if none.
 pub fn build_blob_infos(
     layers: &[LayerInfo],
-    config: Option<&LayerInfo>,
+    config: Option<LayerInfo>,
     blobs_root: &Path,
 ) -> (Option<String>, Vec<BlobPathInfo>) {
     let mut primary_digest_idx: Option<usize> = None;
@@ -250,16 +235,12 @@ pub fn build_blob_infos(
             }
         }
     }
+    let mut out = Vec::with_capacity(layers.len() + config.is_some() as usize);
     let primary_digest = primary_digest_idx
         .and_then(|i| layers.get(i).map(|l| l.digest.clone()))
-        .or_else(|| config.map(|c| c.digest.clone()));
-
-    let mut out = Vec::with_capacity(layers.len() + config.is_some() as usize);
-    for l in layers {
+        .or_else(|| config.clone().map(|c| c.digest));
+    for l in layers.iter().chain(config.iter()) {
         out.push(build_blob_path_info(l, blobs_root));
-    }
-    if let Some(cfg) = config {
-        out.push(build_blob_path_info(cfg, blobs_root));
     }
     (primary_digest, out)
 }
