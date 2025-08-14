@@ -4,7 +4,7 @@ mod args;
 use args::Args;
 
 use clap::Parser;
-use ollama_file_find_inner::*;
+use ollama_file_find::*;
 
 fn main() -> Result<()> {
     let Args {
