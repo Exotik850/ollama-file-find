@@ -194,6 +194,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "ollama-file-find-inner",
+ "serde_json",
+]
+
+[[package]]
+name = "ollama-file-find-inner"
+version = "0.1.0"
+dependencies = [
  "dirs",
  "serde",
  "serde_json",

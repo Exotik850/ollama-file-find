@@ -4,7 +4,7 @@ mod args;
 use args::Args;
 
 use clap::Parser;
-use ollama_file_find::*;
+use ollama_file_find_inner::*;
 
 fn main() -> Result<()> {
     let Args {
@@ -30,7 +30,7 @@ fn main() -> Result<()> {
         blobs_root: &blobs_root,
         include_hidden,
         verbose,
-    })?;
+    });
 
     if plain && !verbose {
         for m in &models {

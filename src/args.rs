@@ -4,6 +4,7 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(
     version,
+    author="@Exotik850",
     about = "List locally installed Ollama models by reading the manifests directory"
 )]
 pub(crate) struct Args {

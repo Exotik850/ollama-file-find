@@ -1,4 +1,3 @@
-use anyhow::Result;
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -215,7 +214,7 @@ fn process_entry(entry: &walkdir::DirEntry, args: &ScanArgs) -> Option<ListedMod
 }
 
 /// Scan manifests and construct `ListedModel` entries.
-pub fn scan_manifests(args: ScanArgs) -> Result<Vec<ListedModel>> {
+pub fn scan_manifests(args: ScanArgs) -> Vec<ListedModel> {
     let mut models = Vec::new();
     for entry_res in walkdir::WalkDir::new(args.root).follow_links(false) {
         let entry = match entry_res {
@@ -230,7 +229,7 @@ pub fn scan_manifests(args: ScanArgs) -> Result<Vec<ListedModel>> {
         }
     }
     models.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    Ok(models)
+    models
 }
 
 /// Build blob path info list and decide primary digest.
