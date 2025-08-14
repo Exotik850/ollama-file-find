@@ -10,10 +10,7 @@ mod models;
 use models::{BlobPathInfo, LayerInfo, ListedModel, ManifestJson};
 
 /// Locate the models directory (`OLLAMA_MODELS` or fallback to $HOME/.ollama/models)
-pub fn resolve_models_dir(override_dir: Option<&Path>) -> PathBuf {
-    if let Some(p) = override_dir {
-        return p.to_path_buf();
-    }
+pub fn ollama_models_dir() -> PathBuf {
     if let Ok(p) = env::var("OLLAMA_MODELS") {
         if !p.is_empty() {
             return PathBuf::from(p);
