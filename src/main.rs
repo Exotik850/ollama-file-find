@@ -11,7 +11,6 @@ fn main() -> Result<()> {
         plain,
         include_hidden,
         verbose,
-        blob_paths,
         models_dir,
     } = Args::parse();
 
@@ -31,10 +30,9 @@ fn main() -> Result<()> {
         blobs_root: &blobs_root,
         include_hidden,
         verbose,
-        blob_paths,
     })?;
 
-    if plain && !blob_paths && !verbose {
+    if plain && !verbose {
         for m in &models {
             println!("{}", m.name);
         }

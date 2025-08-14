@@ -1,17 +1,17 @@
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct ManifestJson {
+pub(crate) struct ManifestData {
     #[serde(default)]
-    pub layers: Vec<LayerJson>,
+    pub layers: Vec<LayerInfo>,
     #[serde(default)]
-    pub config: Option<LayerJson>,
+    pub config: Option<LayerInfo>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
-pub(crate) struct LayerJson {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LayerInfo {
     pub digest: String,
     #[serde(rename = "mediaType")]
     #[serde(default)]
@@ -19,15 +19,12 @@ pub(crate) struct LayerJson {
     pub size: Option<u64>,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ListedModel {
     /// Normalized display name (matches `ollama list` style)
     pub name: String,
-    /// Raw components
-    pub host: Option<String>,
-    pub namespace: Option<String>,
-    pub model: String,
-    pub tag: String,
+    #[serde(flatten)]
+    pub model_id: ModelId,
     /// Filesystem path to manifest
     pub manifest_path: String,
     /// Layers (if verbose)
@@ -50,13 +47,6 @@ pub struct ListedModel {
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
-pub struct LayerInfo {
-    pub digest: String,
-    pub media_type: String,
-    pub size: Option<u64>,
-}
-
-#[derive(Debug, serde::Serialize, Clone)]
 pub struct BlobPathInfo {
     pub digest: String,
     pub media_type: String,
@@ -66,4 +56,91 @@ pub struct BlobPathInfo {
     pub size_ok: Option<bool>, // Only Some if both declared & actual size available
     pub actual_size: Option<u64>,
     pub primary: bool,
+}
+
+/// Internal helper grouping the model identity parts.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModelId {
+    pub host: Option<String>,
+    pub namespace: Option<String>,
+    pub model: String,
+    pub tag: String,
+}
+
+impl ModelId {
+    /// Attempt to mirror Ollama list naming rules
+    pub fn normalize(&self) -> String {
+        let Self {
+            host,
+            namespace,
+            model,
+            tag,
+        } = self;
+        let default_host = "registry.ollama.ai";
+        let library_ns = "library";
+        match (host, namespace) {
+            (Some(h), Some(ns)) if h == default_host && ns == library_ns => {
+                format!("{model}:{tag}")
+            }
+            (Some(h), Some(ns)) if h == default_host => format!("{ns}/{model}:{tag}"),
+            (None, Some(ns)) if ns == library_ns => format!("{model}:{tag}"),
+            (None, Some(ns)) => format!("{ns}/{model}:{tag}"),
+            (Some(h), Some(ns)) => format!("{h}/{ns}/{model}:{tag}"),
+            _ => format!("{model}:{tag}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    pub fn test_normalize() {
+        assert_eq!(
+            ModelId::normalize(&ModelId {
+                host: None,
+                namespace: None,
+                model: "mistral".to_string(),
+                tag: "7b".to_string(),
+            }),
+            "mistral:7b"
+        );
+        assert_eq!(
+            ModelId::normalize(&ModelId {
+                host: Some("registry.ollama.ai".to_string()),
+                namespace: Some("apple".to_string()),
+                model: "OpenELM".to_string(),
+                tag: "latest".to_string(),
+            }),
+            "apple/OpenELM:latest"
+        );
+        assert_eq!(
+            ModelId::normalize(&ModelId {
+                host: None,
+                namespace: Some("apple".to_string()),
+                model: "OpenELM".to_string(),
+                tag: "latest".to_string(),
+            }),
+            "apple/OpenELM:latest"
+        );
+        assert_eq!(
+            ModelId::normalize(&ModelId {
+                host: Some("myhost".to_string()),
+                namespace: Some("myns".to_string()),
+                model: "lips".to_string(),
+                tag: "code".to_string(),
+            }),
+            "myhost/myns/lips:code"
+        );
+        assert_eq!(
+            ModelId::normalize(&ModelId {
+                host: None,
+                namespace: Some("library".to_string()),
+                model: "phi4".to_string(),
+                tag: "latest".to_string(),
+            }),
+            "phi4:latest"
+        );
+    }
 }

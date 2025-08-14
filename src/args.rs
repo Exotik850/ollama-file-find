@@ -15,13 +15,10 @@ pub(crate) struct Args {
     #[arg(long)]
     pub include_hidden: bool,
 
-    /// Show layer digests, sizes, total size, timestamps
+    /// Show layer digests, sizes, total size, timestamps,
+    /// and blob paths
     #[arg(long)]
     pub verbose: bool,
-
-    /// Include blob path resolution (implies JSON output)
-    #[arg(long)]
-    pub blob_paths: bool,
 
     /// Root of models directory (overrides env + fallback)
     #[arg(long)]
