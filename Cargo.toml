@@ -4,6 +4,7 @@ version = "0.1.1"
 edition = "2024"
 license = "MIT"
 description = "A command-line interface for the Ollama file find library."
+repository = "https://github.com/Exotik850/ollama-file-find"
 
 [dependencies]
 ollama-file-find = { path = "src/ollama-file-find-inner", version = "0.1.0"}
