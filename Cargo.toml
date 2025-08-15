@@ -3,6 +3,7 @@ name = "ollama-file-find-cli"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "A command-line interface for the Ollama file find library."
 
 [dependencies]
 ollama-file-find = { path = "src/ollama-file-find-inner", version = "0.1.0"}
