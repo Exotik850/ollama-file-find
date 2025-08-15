@@ -1,4 +1,4 @@
-ollama-file-find
+ollama-file-find-cli
 =================
 
 List and inspect locally installed [Ollama](https://ollama.com) models by directly reading the on‑disk `manifests` and `blobs` directories. Ships as:
@@ -205,7 +205,7 @@ Roadmap / Ideas
 License
 --------------------------------------------------
 
-This project is license under the [MIT License](./LICENSE.md)
+This project is license under the [MIT License](https://github.com/Exotik850/ollama-file-find/blob/master/LICENSE.md)
 
 --------------------------------------------------
 Acknowledgements
