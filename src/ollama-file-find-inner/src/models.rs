@@ -98,48 +98,53 @@ mod tests {
     #[test]
     pub fn test_normalize() {
         assert_eq!(
-            ModelId::normalize(&ModelId {
+            ModelId {
                 host: None,
                 namespace: None,
                 model: "mistral".to_string(),
                 tag: "7b".to_string(),
-            }),
+            }
+            .normalize(),
             "mistral:7b"
         );
         assert_eq!(
-            ModelId::normalize(&ModelId {
+            ModelId {
                 host: Some("registry.ollama.ai".to_string()),
                 namespace: Some("apple".to_string()),
                 model: "OpenELM".to_string(),
                 tag: "latest".to_string(),
-            }),
+            }
+            .normalize(),
             "apple/OpenELM:latest"
         );
         assert_eq!(
-            ModelId::normalize(&ModelId {
+            ModelId {
                 host: None,
                 namespace: Some("apple".to_string()),
                 model: "OpenELM".to_string(),
                 tag: "latest".to_string(),
-            }),
+            }
+            .normalize(),
             "apple/OpenELM:latest"
         );
         assert_eq!(
-            ModelId::normalize(&ModelId {
+            ModelId {
                 host: Some("myhost".to_string()),
                 namespace: Some("myns".to_string()),
                 model: "lips".to_string(),
                 tag: "code".to_string(),
-            }),
+            }
+            .normalize(),
             "myhost/myns/lips:code"
         );
         assert_eq!(
-            ModelId::normalize(&ModelId {
+            ModelId {
                 host: None,
                 namespace: Some("library".to_string()),
                 model: "phi4".to_string(),
                 tag: "latest".to_string(),
-            }),
+            }
+            .normalize(),
             "phi4:latest"
         );
     }
