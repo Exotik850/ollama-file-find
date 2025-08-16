@@ -1,5 +1,6 @@
 use std::{
     env, fs,
+    io,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -9,6 +10,33 @@ use models::{BlobPathInfo, LayerInfo, ListedModel};
 
 use crate::models::{ManifestData, ModelId};
 
+/// Library wide result type.
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// Error enum describing all failure modes the library can encounter.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Environment variable error: {0}")] 
+    EnvVar(#[from] env::VarError),
+    #[error("Home directory not found")] 
+    HomeDirNotFound,
+    #[error("IO error at {path}: {source}")] 
+    Io { path: PathBuf, source: io::Error },
+    #[error("Walkdir error: {0}")] 
+    WalkDir(#[from] walkdir::Error),
+    #[error("JSON parse error at {path}: {source}")] 
+    Json { path: PathBuf, source: serde_json::Error },
+    #[error("Invalid path components for manifest under {0}")] 
+    InvalidComponents(PathBuf),
+}
+
+/// Outcome of a scan: the successfully parsed models plus any errors that occurred.
+#[derive(Debug)]
+pub struct ScanOutcome {
+    pub models: Vec<ListedModel>,
+    pub errors: Vec<Error>,
+}
+
 /// Locate the models directory (`OLLAMA_MODELS` or fallback to $HOME/.ollama/models)
 pub fn ollama_models_dir() -> PathBuf {
     if let Ok(p) = env::var("OLLAMA_MODELS") {
@@ -16,6 +44,7 @@ pub fn ollama_models_dir() -> PathBuf {
             return PathBuf::from(p);
         }
     }
+    // Fallback to home, but if not found just current directory relative path
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".ollama").join("models")
 }
@@ -51,15 +80,12 @@ fn parse_components(comps: Vec<String>, include_hidden: bool) -> Option<ModelId>
     if !(comps.len() == 4 || comps.len() == 3) {
         return None;
     }
-
     let tag = comps.last().unwrap();
-    if !include_hidden && tag.starts_with('.') {
+    if !include_hidden && tag.starts_with('.')
+        || comps[..comps.len() - 1].iter().any(|c| c.starts_with('.'))
+    {
         return None;
     }
-    if !include_hidden && comps[..comps.len() - 1].iter().any(|c| c.starts_with('.')) {
-        return None;
-    }
-
     let (host, namespace, model, tag) = match comps.len() {
         4 => {
             let mut it = comps.into_iter();
@@ -87,21 +113,10 @@ fn parse_components(comps: Vec<String>, include_hidden: bool) -> Option<ModelId>
 }
 
 /// Read & parse a manifest JSON file into a strongly typed structure.
-fn load_manifest(path: &Path) -> Option<ManifestData> {
-    let data = match fs::read(path) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("Failed reading manifest {}: {e}", path.display());
-            return None;
-        }
-    };
-    match serde_json::from_slice(&data) {
-        Ok(p) => Some(p),
-        Err(e) => {
-            eprintln!("Skipping invalid manifest JSON {}: {e}", path.display());
-            None
-        }
-    }
+fn load_manifest(path: &Path) -> Result<ManifestData> {
+    let data = fs::read(path).map_err(|e| Error::Io { path: path.to_path_buf(), source: e })?;
+    let parsed = serde_json::from_slice(&data).map_err(|e| Error::Json { path: path.to_path_buf(), source: e })?;
+    Ok(parsed)
 }
 
 /// Sum layer + config sizes, returning None if no declared sizes exist.
@@ -181,40 +196,43 @@ fn build_listed_model(
 /// Attempt to turn a filesystem entry into a `ListedModel` (only if it's a manifest file
 /// with valid components). Returns `None` for directories, hidden-excluded entries, or
 /// any IO / parse failures.
-fn process_entry(entry: &walkdir::DirEntry, args: &ScanArgs) -> Option<ListedModel> {
+fn process_entry(entry: &walkdir::DirEntry, args: &ScanArgs) -> Result<Option<ListedModel>> {
     if entry.file_type().is_dir() {
-        return None;
+        return Ok(None);
     }
-    let comps = relative_components(entry, args.root)?;
-    let id = parse_components(comps, args.include_hidden)?;
+    let comps = match relative_components(entry, args.root) {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+    let id = parse_components(comps, args.include_hidden)
+        .ok_or_else(|| Error::InvalidComponents(entry.path().to_path_buf()))?;
     let manifest_path = entry.path();
     let manifest = load_manifest(manifest_path)?;
-    Some(build_listed_model(
+    Ok(Some(build_listed_model(
         id,
         manifest,
         manifest_path,
         args.blobs_root,
         args.verbose,
-    ))
+    )))
 }
 
 /// Scan manifests and construct `ListedModel` entries.
-pub fn scan_manifests(args: ScanArgs) -> Vec<ListedModel> {
+pub fn scan_manifests(args: ScanArgs) -> ScanOutcome {
     let mut models = Vec::new();
+    let mut errors = Vec::new();
     for entry_res in walkdir::WalkDir::new(args.root).follow_links(false) {
-        let entry = match entry_res {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("Skipping entry error: {e}");
-                continue;
-            }
-        };
-        if let Some(model) = process_entry(&entry, &args) {
-            models.push(model);
+        match entry_res {
+            Ok(entry) => match process_entry(&entry, &args) {
+                Ok(Some(model)) => models.push(model),
+                Ok(None) => {}
+                Err(e) => errors.push(e),
+            },
+            Err(e) => errors.push(Error::WalkDir(e)),
         }
     }
     models.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-    models
+    ScanOutcome { models, errors }
 }
 
 /// Build blob path info list and decide primary digest.

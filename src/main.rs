@@ -25,19 +25,23 @@ fn main() -> Result<()> {
         );
     }
 
-    let models = scan_manifests(ScanArgs {
+    let outcome = scan_manifests(ScanArgs {
         root: &manifests_root,
         blobs_root: &blobs_root,
         include_hidden,
         verbose,
     });
+    // For CLI: optionally report errors, but continue.
+    for e in &outcome.errors {
+        eprintln!("Warning: {e}");
+    }
 
     if plain && !verbose {
-        for m in &models {
+        for m in &outcome.models {
             println!("{}", m.name);
         }
     } else {
-        println!("{}", serde_json::to_string_pretty(&models)?);
+        println!("{}", serde_json::to_string_pretty(&outcome.models)?);
     }
 
     Ok(())
