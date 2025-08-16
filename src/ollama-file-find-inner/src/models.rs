@@ -48,12 +48,11 @@ pub struct ListedModel {
 
 impl ListedModel {
     /// Construct a non-verbose (base) ListedModel. Only identity & manifest path are populated.
-    pub fn new(model_id: ModelId, manifest_path: impl AsRef<Path>) -> ListedModel {
-        let manifest_path = manifest_path.as_ref();
+    pub fn new(model_id: ModelId, manifest_path: impl Into<PathBuf>) -> ListedModel {
         ListedModel {
             name: model_id.normalize(),
             model_id,
-            manifest_path: manifest_path.to_path_buf(),
+            manifest_path: manifest_path.into(),
             layers: None,
             config: None,
             total_size: None,
@@ -96,7 +95,7 @@ pub struct BlobPathInfo {
     pub digest: String,
     pub media_type: String,
     pub declared_size: Option<u64>,
-    pub path: String,
+    pub path: PathBuf,
     pub exists: bool,
     pub size_ok: Option<bool>, // Only Some if both declared & actual size available
     pub actual_size: Option<u64>,

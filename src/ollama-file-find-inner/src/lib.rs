@@ -235,7 +235,7 @@ pub fn build_blob_path_info(l: &LayerInfo, blobs_root: &Path) -> BlobPathInfo {
         digest: l.digest.clone(),
         media_type: l.media_type.clone(),
         declared_size: l.size,
-        path: path.display().to_string(),
+        path,
         exists,
         size_ok,
         actual_size,
