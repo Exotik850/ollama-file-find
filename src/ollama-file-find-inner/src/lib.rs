@@ -146,53 +146,6 @@ fn compute_mtime(path: &Path) -> Option<u64> {
         .map(|d| d.as_secs())
 }
 
-/// Build the final `ListedModel` structure from its pieces.
-fn build_listed_model(
-    model_id: ModelId,
-    manifest: ManifestData,
-    manifest_path: &Path,
-    blobs_root: &Path,
-    verbose: bool,
-) -> ListedModel {
-    let name = model_id.normalize();
-    // Optional details only computed if requested.
-    let total_size = verbose
-        .then(|| compute_total_size(&manifest.layers, manifest.config.as_ref()))
-        .flatten();
-    let mtime = verbose.then(|| compute_mtime(manifest_path)).flatten();
-
-    // Blob path info (primary + list) only if either verbose or blob_paths requested.
-    let (primary_blob_path, blob_paths) = if verbose {
-        let (primary_digest, mut infos) =
-            build_blob_infos(&manifest.layers, manifest.config.clone(), blobs_root);
-        let primary_path = primary_digest
-            .as_ref()
-            .map(|d| digest_to_blob_path(blobs_root, d));
-        if let Some(pd) = primary_digest {
-            for bi in &mut infos {
-                if bi.digest == pd {
-                    bi.primary = true;
-                }
-            }
-        }
-        (primary_path, infos)
-    } else {
-        (None, Vec::new())
-    };
-
-    ListedModel {
-        name,
-        model_id,
-        manifest_path: manifest_path.display().to_string(),
-        layers: verbose.then_some(manifest.layers),
-        config: verbose.then_some(manifest.config).flatten(),
-        total_size,
-        mtime,
-        primary_blob_path,
-        blob_paths: (!blob_paths.is_empty()).then_some(blob_paths),
-    }
-}
-
 /// Attempt to turn a filesystem entry into a `ListedModel` (only if it's a manifest file
 /// with valid components). Returns `None` for directories, hidden-excluded entries, or
 /// any IO / parse failures.
@@ -208,13 +161,12 @@ fn process_entry(entry: &walkdir::DirEntry, args: &ScanArgs) -> Result<Option<Li
         .ok_or_else(|| Error::InvalidComponents(entry.path().to_path_buf()))?;
     let manifest_path = entry.path();
     let manifest = load_manifest(manifest_path)?;
-    Ok(Some(build_listed_model(
-        id,
-        manifest,
-        manifest_path,
-        args.blobs_root,
-        args.verbose,
-    )))
+    let model = ListedModel::new(id, manifest_path);
+    if args.verbose {
+        Ok(Some(model.into_verbose(manifest, &args.blobs_root)))
+    } else {
+        Ok(Some(model))
+    }
 }
 
 /// Scan manifests and construct `ListedModel` entries.

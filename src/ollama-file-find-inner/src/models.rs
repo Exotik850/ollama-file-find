@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct ManifestData {
+pub struct ManifestData {
     #[serde(default)]
     pub layers: Vec<LayerInfo>,
     #[serde(default)]
@@ -26,7 +26,7 @@ pub struct ListedModel {
     #[serde(flatten)]
     pub model_id: ModelId,
     /// Filesystem path to manifest
-    pub manifest_path: String,
+    pub manifest_path: PathBuf,
     /// Layers (if verbose)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layers: Option<Vec<LayerInfo>>,
@@ -44,6 +44,51 @@ pub struct ListedModel {
     /// All blob paths (if `blob_paths`)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_paths: Option<Vec<BlobPathInfo>>,
+}
+
+impl ListedModel {
+    /// Construct a non-verbose (base) ListedModel. Only identity & manifest path are populated.
+    pub fn new(model_id: ModelId, manifest_path: impl AsRef<Path>) -> ListedModel {
+        let manifest_path = manifest_path.as_ref();
+        ListedModel {
+            name: model_id.normalize(),
+            model_id,
+            manifest_path: manifest_path.to_path_buf(),
+            layers: None,
+            config: None,
+            total_size: None,
+            mtime: None,
+            primary_blob_path: None,
+            blob_paths: None,
+        }
+    }
+
+    pub fn into_verbose(self, manifest: ManifestData, blobs_root: impl AsRef<Path>) -> Self {
+        let blobs_root = blobs_root.as_ref();
+        let total_size = crate::compute_total_size(&manifest.layers, manifest.config.as_ref());
+        let mtime = crate::compute_mtime(&self.manifest_path);
+        let (primary_digest, mut infos) =
+            crate::build_blob_infos(&manifest.layers, manifest.config.as_ref(), blobs_root);
+        let primary_blob_path = primary_digest
+            .as_ref()
+            .map(|d| crate::digest_to_blob_path(blobs_root, d));
+        if let Some(pd) = primary_digest {
+            for bi in &mut infos {
+                if bi.digest == pd {
+                    bi.primary = true;
+                }
+            }
+        }
+        ListedModel {
+            layers: Some(manifest.layers),
+            config: manifest.config,
+            total_size,
+            mtime,
+            primary_blob_path,
+            blob_paths: Some(infos),
+            ..self
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
