@@ -8,6 +8,9 @@ use std::{
 mod models;
 use models::{BlobPathInfo, LayerInfo, ListedModel};
 
+mod scan_args;
+pub use scan_args::ScanArgs;
+
 use crate::models::{ManifestData, ModelId};
 
 /// Library wide result type.

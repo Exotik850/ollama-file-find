@@ -4,7 +4,7 @@ mod args;
 use args::Args;
 
 use clap::Parser;
-use ollama_file_find::*;
+use ollama_file_find::{ScanArgs, ollama_models_dir, scan_manifests};
 
 fn main() -> Result<()> {
     let Args {
@@ -25,13 +25,12 @@ fn main() -> Result<()> {
         );
     }
 
-    let outcome = scan_manifests(ScanArgs {
-        root: &manifests_root,
-        blobs_root: &blobs_root,
-        include_hidden,
-        verbose,
-    });
-    // For CLI: optionally report errors, but continue.
+    let outcome = scan_manifests(
+        ScanArgs::new(manifests_root, blobs_root)
+            .with_include_hidden(include_hidden)
+            .with_verbose(verbose),
+    );
+
     for e in &outcome.errors {
         eprintln!("Warning: {e}");
     }
