@@ -1,6 +1,9 @@
 use std::{
-    env, fs,
-    io,
+    borrow::Cow,
+    env,
+    f32::consts::E,
+    fs, io,
+    mem::take,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -19,18 +22,23 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// Error enum describing all failure modes the library can encounter.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Environment variable error: {0}")] 
+    #[error("Environment variable error: {0}")]
     EnvVar(#[from] env::VarError),
-    #[error("Home directory not found")] 
+    #[error("Home directory not found")]
     HomeDirNotFound,
-    #[error("IO error at {path}: {source}")] 
+    #[error("IO error at {path}: {source}")]
     Io { path: PathBuf, source: io::Error },
-    #[error("Walkdir error: {0}")] 
+    #[error("Walkdir error: {0}")]
     WalkDir(#[from] walkdir::Error),
-    #[error("JSON parse error at {path}: {source}")] 
-    Json { path: PathBuf, source: serde_json::Error },
-    #[error("Invalid path components for manifest under {0}")] 
-    InvalidComponents(PathBuf),
+    #[error("JSON parse error at {path}: {source}")]
+    Json {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    #[error("Invalid path components for manifest under {0}")]
+    InvalidComponentPath(PathBuf),
+    #[error("Invalid components: {0:?}")]
+    InvalidComponents(Vec<String>),
 }
 
 /// Outcome of a scan: the successfully parsed models plus any errors that occurred.
@@ -52,73 +60,68 @@ pub fn ollama_models_dir() -> PathBuf {
     home.join(".ollama").join("models")
 }
 
-/// Arguments controlling a scan of the manifests directory.
-pub struct ScanArgs<'a> {
-    /// Root of the manifests tree (models/manifests)
-    pub root: &'a Path,
-    /// Root of the blobs directory (models/blobs)
-    pub blobs_root: &'a Path,
-    /// Include entries whose components (namespace, tag, etc.) start with '.'
-    pub include_hidden: bool,
-    /// Include extra detail (layer list, total size, mtime, blob info)
-    pub verbose: bool,
-}
 
-fn relative_components(entry: &walkdir::DirEntry, root: &Path) -> Option<Vec<String>> {
-    let rel = entry.path().strip_prefix(root).ok()?;
+/// Get the relative path components for a directory entry.
+fn relative_components(entry: &walkdir::DirEntry, root: &Path) -> Result<Vec<String>> {
+    if !entry.path().starts_with(root) {
+        return Err(Error::InvalidComponentPath(entry.path().to_path_buf()));
+    }
+    let rel = entry.path().strip_prefix(root).expect("Should be relative");
     let comps: Vec<String> = rel
         .iter()
         .map(|c| c.to_string_lossy().to_string())
         .collect();
     if comps.is_empty() {
-        return None;
+        return Err(Error::InvalidComponentPath(entry.path().to_path_buf()));
     }
-    Some(comps)
+    Ok(comps)
 }
 
-// TODO: Clean this up somehow
 /// Interpret path components as (host?, namespace, model, tag).
-fn parse_components(comps: Vec<String>, include_hidden: bool) -> Option<ModelId> {
-    // Accept 4 components host/namespace/model/tag or 3 components namespace/model/tag
-    if !(comps.len() == 4 || comps.len() == 3) {
-        return None;
+fn parse_components(mut comps: Vec<String>, include_hidden: bool) -> Result<Option<ModelId>> {
+    // Accept either:
+    //   4 components: host / namespace / model / tag
+    //   3 components:          namespace / model / tag
+    match comps.len() {
+        3 | 4 => {}
+        _ => return Err(Error::InvalidComponents(comps)),
     }
-    let tag = comps.last().unwrap();
-    if !include_hidden && tag.starts_with('.')
-        || comps[..comps.len() - 1].iter().any(|c| c.starts_with('.'))
-    {
-        return None;
+
+    // Exclude any component starting with '.' unless explicitly allowed.
+    if !include_hidden && comps.iter().any(|c| c.starts_with('.')) {
+        return Ok(None);
     }
-    let (host, namespace, model, tag) = match comps.len() {
-        4 => {
-            let mut it = comps.into_iter();
-            let host = it.next().unwrap();
-            let namespace = it.next().unwrap();
-            let model = it.next().unwrap();
-            let tag = it.next().unwrap();
-            (Some(host), Some(namespace), model, tag)
-        }
-        3 => {
-            let mut it = comps.into_iter();
-            let namespace = it.next().unwrap();
-            let model = it.next().unwrap();
-            let tag = it.next().unwrap();
-            (None, Some(namespace), model, tag)
-        }
-        _ => unreachable!(), // length already validated above
+
+    // Destructure and clone only what we need.
+    let (host, namespace, model, tag) = match comps.as_mut_slice() {
+        [host, namespace, model, tag] => (
+            Some(take(host)),
+            Some(take(namespace)),
+            take(model),
+            take(tag),
+        ),
+        [namespace, model, tag] => (None, Some(take(namespace)), take(model), take(tag)),
+        _ => unreachable!("Lengths other than 3 or 4 already returned above"),
     };
-    Some(ModelId {
+
+    Ok(Some(ModelId {
         host,
         namespace,
         model,
         tag,
-    })
+    }))
 }
 
 /// Read & parse a manifest JSON file into a strongly typed structure.
 fn load_manifest(path: &Path) -> Result<ManifestData> {
-    let data = fs::read(path).map_err(|e| Error::Io { path: path.to_path_buf(), source: e })?;
-    let parsed = serde_json::from_slice(&data).map_err(|e| Error::Json { path: path.to_path_buf(), source: e })?;
+    let data = fs::read(path).map_err(|e| Error::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let parsed = serde_json::from_slice(&data).map_err(|e| Error::Json {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
     Ok(parsed)
 }
 
@@ -141,6 +144,7 @@ fn compute_total_size(layers: &[LayerInfo], config: Option<&LayerInfo>) -> Optio
     if any { Some(sum) } else { None }
 }
 
+// Number of seconds since the file was last modified, if applicable
 fn compute_mtime(path: &Path) -> Option<u64> {
     fs::metadata(path)
         .ok()
@@ -156,12 +160,10 @@ fn process_entry(entry: &walkdir::DirEntry, args: &ScanArgs) -> Result<Option<Li
     if entry.file_type().is_dir() {
         return Ok(None);
     }
-    let comps = match relative_components(entry, args.root) {
-        Some(c) => c,
-        None => return Ok(None),
+    let comps = relative_components(entry, &args.root)?;
+    let Some(id) = parse_components(comps, args.include_hidden)? else {
+        return Ok(None);
     };
-    let id = parse_components(comps, args.include_hidden)
-        .ok_or_else(|| Error::InvalidComponents(entry.path().to_path_buf()))?;
     let manifest_path = entry.path();
     let manifest = load_manifest(manifest_path)?;
     let model = ListedModel::new(id, manifest_path);
@@ -176,7 +178,7 @@ fn process_entry(entry: &walkdir::DirEntry, args: &ScanArgs) -> Result<Option<Li
 pub fn scan_manifests(args: ScanArgs) -> ScanOutcome {
     let mut models = Vec::new();
     let mut errors = Vec::new();
-    for entry_res in walkdir::WalkDir::new(args.root).follow_links(false) {
+    for entry_res in walkdir::WalkDir::new(&args.root).follow_links(false) {
         match entry_res {
             Ok(entry) => match process_entry(&entry, &args) {
                 Ok(Some(model)) => models.push(model),
@@ -193,11 +195,11 @@ pub fn scan_manifests(args: ScanArgs) -> ScanOutcome {
 /// Build blob path info list and decide primary digest.
 /// Build blob info records for layers + optional config, returning the primary digest chosen.
 /// Primary heuristic: largest (by declared size) layer; fall back to config if none.
-pub fn build_blob_infos(
-    layers: &[LayerInfo],
-    config: Option<LayerInfo>,
+pub fn build_blob_infos<'a>(
+    layers: &'a [LayerInfo],
+    config: Option<&'a LayerInfo>,
     blobs_root: &Path,
-) -> (Option<String>, Vec<BlobPathInfo>) {
+) -> (Option<&'a str>, Vec<BlobPathInfo>) {
     let mut primary_digest_idx: Option<usize> = None;
     let mut max_size: u64 = 0;
     for (i, l) in layers.iter().enumerate() {
@@ -208,11 +210,11 @@ pub fn build_blob_infos(
             }
         }
     }
-    let mut out = Vec::with_capacity(layers.len() + config.is_some() as usize);
+    let mut out = Vec::with_capacity(layers.len() + usize::from(config.is_some()));
     let primary_digest = primary_digest_idx
-        .and_then(|i| layers.get(i).map(|l| l.digest.clone()))
-        .or_else(|| config.clone().map(|c| c.digest));
-    for l in layers.iter().chain(config.iter()) {
+        .and_then(|i| layers.get(i).map(|l| l.digest.as_ref()))
+        .or_else(|| (&config).map(|c| c.digest.as_ref()));
+    for l in layers.iter().chain(config.iter().copied()) {
         out.push(build_blob_path_info(l, blobs_root));
     }
     (primary_digest, out)

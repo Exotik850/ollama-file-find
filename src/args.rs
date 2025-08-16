@@ -1,10 +1,10 @@
-use std::path::PathBuf;
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
     version,
-    author="@Exotik850",
+    author = "@Exotik850",
     about = "List locally installed Ollama models by reading the manifests directory"
 )]
 pub(crate) struct Args {
