@@ -13,7 +13,7 @@ pub struct ScanArgs<'a> {
 }
 
 impl<'a> ScanArgs<'a> {
-    /// Create ScanArgs borrowing the provided paths.
+    /// Create `ScanArgs` borrowing the provided paths.
     pub fn new<P1: Into<Cow<'a, Path>>, P2: Into<Cow<'a, Path>>>(root: P1, blobs_root: P2) -> Self {
         ScanArgs {
             root: root.into(),
@@ -22,14 +22,14 @@ impl<'a> ScanArgs<'a> {
         }
     }
 
-    pub fn with_include_hidden(self, include_hidden: bool) -> Self {
+    #[must_use] pub fn with_include_hidden(self, include_hidden: bool) -> Self {
         ScanArgs {
             include_hidden,
             ..self
         }
     }
 
-    pub fn with_verbose(self, verbose: bool) -> Self {
+    #[must_use] pub fn with_verbose(self, verbose: bool) -> Self {
         ScanArgs { verbose, ..self }
     }
 }

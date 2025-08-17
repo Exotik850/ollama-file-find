@@ -26,7 +26,7 @@ fn main() -> Result<()> {
     }
 
     let outcome = scan_manifests(
-        ScanArgs::new(manifests_root, blobs_root)
+        &ScanArgs::new(manifests_root, blobs_root)
             .with_include_hidden(include_hidden)
             .with_verbose(verbose),
     );

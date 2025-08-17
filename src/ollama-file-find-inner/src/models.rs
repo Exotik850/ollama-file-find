@@ -47,7 +47,7 @@ pub struct ListedModel {
 }
 
 impl ListedModel {
-    /// Construct a non-verbose (base) ListedModel. Only identity & manifest path are populated.
+    /// Construct a non-verbose (base) `ListedModel`. Only identity & manifest path are populated.
     pub fn new(model_id: ModelId, manifest_path: impl Into<PathBuf>) -> ListedModel {
         ListedModel {
             name: model_id.normalize(),
@@ -62,7 +62,7 @@ impl ListedModel {
         }
     }
 
-    pub fn into_verbose(self, manifest: ManifestData, blobs_root: impl AsRef<Path>) -> Self {
+    #[must_use] pub fn into_verbose(self, manifest: ManifestData, blobs_root: impl AsRef<Path>) -> Self {
         let blobs_root = blobs_root.as_ref();
         let total_size = crate::compute_total_size(&manifest.layers, manifest.config.as_ref());
         let mtime = crate::compute_mtime(&self.manifest_path);

@@ -1,7 +1,5 @@
 use std::{
-    borrow::Cow,
     env,
-    f32::consts::E,
     fs, io,
     mem::take,
     path::{Path, PathBuf},
@@ -49,17 +47,15 @@ pub struct ScanOutcome {
 }
 
 /// Locate the models directory (`OLLAMA_MODELS` or fallback to $HOME/.ollama/models)
-pub fn ollama_models_dir() -> PathBuf {
-    if let Ok(p) = env::var("OLLAMA_MODELS") {
-        if !p.is_empty() {
+#[must_use] pub fn ollama_models_dir() -> PathBuf {
+    if let Ok(p) = env::var("OLLAMA_MODELS")
+        && !p.is_empty() {
             return PathBuf::from(p);
         }
-    }
     // Fallback to home, but if not found just current directory relative path
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".ollama").join("models")
 }
-
 
 /// Get the relative path components for a directory entry.
 fn relative_components(entry: &walkdir::DirEntry, root: &Path) -> Result<Vec<String>> {
@@ -135,12 +131,11 @@ fn compute_total_size(layers: &[LayerInfo], config: Option<&LayerInfo>) -> Optio
             any = true;
         }
     }
-    if let Some(cfg) = config {
-        if let Some(sz) = cfg.size {
+    if let Some(cfg) = config
+        && let Some(sz) = cfg.size {
             sum += sz;
             any = true;
         }
-    }
     if any { Some(sum) } else { None }
 }
 
@@ -175,7 +170,7 @@ fn process_entry(entry: &walkdir::DirEntry, args: &ScanArgs) -> Result<Option<Li
 }
 
 /// Scan manifests and construct `ListedModel` entries.
-pub fn scan_manifests(args: ScanArgs) -> ScanOutcome {
+#[must_use] pub fn scan_manifests(args: &ScanArgs) -> ScanOutcome {
     let mut models = Vec::new();
     let mut errors = Vec::new();
     for entry_res in walkdir::WalkDir::new(&args.root).follow_links(false) {
@@ -195,7 +190,7 @@ pub fn scan_manifests(args: ScanArgs) -> ScanOutcome {
 /// Build blob path info list and decide primary digest.
 /// Build blob info records for layers + optional config, returning the primary digest chosen.
 /// Primary heuristic: largest (by declared size) layer; fall back to config if none.
-pub fn build_blob_infos<'a>(
+#[must_use] pub fn build_blob_infos<'a>(
     layers: &'a [LayerInfo],
     config: Option<&'a LayerInfo>,
     blobs_root: &Path,
@@ -203,17 +198,16 @@ pub fn build_blob_infos<'a>(
     let mut primary_digest_idx: Option<usize> = None;
     let mut max_size: u64 = 0;
     for (i, l) in layers.iter().enumerate() {
-        if let Some(sz) = l.size {
-            if sz > max_size {
+        if let Some(sz) = l.size
+            && sz > max_size {
                 max_size = sz;
                 primary_digest_idx = Some(i);
             }
-        }
     }
     let mut out = Vec::with_capacity(layers.len() + usize::from(config.is_some()));
     let primary_digest = primary_digest_idx
         .and_then(|i| layers.get(i).map(|l| l.digest.as_ref()))
-        .or_else(|| (&config).map(|c| c.digest.as_ref()));
+        .or_else(|| config.map(|c| c.digest.as_ref()));
     for l in layers.iter().chain(config.iter().copied()) {
         out.push(build_blob_path_info(l, blobs_root));
     }
@@ -221,7 +215,7 @@ pub fn build_blob_infos<'a>(
 }
 
 /// Produce a `BlobPathInfo` for the provided layer/config entry.
-pub fn build_blob_path_info(l: &LayerInfo, blobs_root: &Path) -> BlobPathInfo {
+#[must_use] pub fn build_blob_path_info(l: &LayerInfo, blobs_root: &Path) -> BlobPathInfo {
     let path = digest_to_blob_path(blobs_root, &l.digest);
     let (exists, actual_size, size_ok) = match fs::metadata(&path) {
         Ok(meta) => {
@@ -244,7 +238,7 @@ pub fn build_blob_path_info(l: &LayerInfo, blobs_root: &Path) -> BlobPathInfo {
 }
 
 /// Translate a content digest (e.g. `sha256:abcd...`) to Ollama's on-disk blob path.
-pub fn digest_to_blob_path(blobs_root: &Path, digest: &str) -> PathBuf {
+#[must_use] pub fn digest_to_blob_path(blobs_root: &Path, digest: &str) -> PathBuf {
     // Expect "sha256:abcdef..."
     // Ollama stores as "sha256-abcdef..."
     if let Some(rest) = digest.strip_prefix("sha256:") {
