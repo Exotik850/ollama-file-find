@@ -9,7 +9,7 @@ use std::{
 };
 
 mod models;
-use models::{BlobPathInfo, LayerInfo, ListedModel};
+pub use models::{BlobPathInfo, LayerInfo, ListedModel};
 
 mod scan_args;
 pub use scan_args::ScanArgs;
