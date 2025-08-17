@@ -22,14 +22,16 @@ impl<'a> ScanArgs<'a> {
         }
     }
 
-    #[must_use] pub fn with_include_hidden(self, include_hidden: bool) -> Self {
+    #[must_use]
+    pub fn with_include_hidden(self, include_hidden: bool) -> Self {
         ScanArgs {
             include_hidden,
             ..self
         }
     }
 
-    #[must_use] pub fn with_verbose(self, verbose: bool) -> Self {
+    #[must_use]
+    pub fn with_verbose(self, verbose: bool) -> Self {
         ScanArgs { verbose, ..self }
     }
 }

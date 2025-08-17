@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::OllamaMediaType;
+
 #[derive(Deserialize, Debug)]
 pub struct ManifestData {
     #[serde(default)]
@@ -15,7 +17,7 @@ pub struct LayerInfo {
     pub digest: String,
     #[serde(rename = "mediaType")]
     #[serde(default)]
-    pub media_type: String,
+    pub media_type: OllamaMediaType,
     pub size: Option<u64>,
 }
 
@@ -62,7 +64,8 @@ impl ListedModel {
         }
     }
 
-    #[must_use] pub fn into_verbose(self, manifest: ManifestData, blobs_root: impl AsRef<Path>) -> Self {
+    #[must_use]
+    pub fn into_verbose(self, manifest: ManifestData, blobs_root: impl AsRef<Path>) -> Self {
         let blobs_root = blobs_root.as_ref();
         let total_size = crate::compute_total_size(&manifest.layers, manifest.config.as_ref());
         let mtime = crate::compute_mtime(&self.manifest_path);
@@ -93,7 +96,7 @@ impl ListedModel {
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct BlobPathInfo {
     pub digest: String,
-    pub media_type: String,
+    pub media_type: OllamaMediaType,
     pub declared_size: Option<u64>,
     pub path: PathBuf,
     pub exists: bool,
