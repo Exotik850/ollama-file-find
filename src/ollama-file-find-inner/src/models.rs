@@ -1,8 +1,27 @@
 use std::path::{Path, PathBuf};
 
+use mime::Mime;
 use serde::{Deserialize, Serialize};
 
-use crate::OllamaMediaType;
+mod mime_serde {
+    use mime::Mime;
+    use serde::Serializer;
+
+    pub fn serialize<S>(mime: &Mime, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&mime.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Mime, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s: &str = serde::Deserialize::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
 
 #[derive(Deserialize, Debug)]
 pub struct ManifestData {
@@ -16,8 +35,8 @@ pub struct ManifestData {
 pub struct LayerInfo {
     pub digest: String,
     #[serde(rename = "mediaType")]
-    #[serde(default)]
-    pub media_type: OllamaMediaType,
+    #[serde(with = "mime_serde")]
+    pub media_type: Mime,
     pub size: Option<u64>,
 }
 
@@ -96,7 +115,8 @@ impl ListedModel {
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct BlobPathInfo {
     pub digest: String,
-    pub media_type: OllamaMediaType,
+    #[serde(with = "mime_serde")]
+    pub media_type: Mime,
     pub declared_size: Option<u64>,
     pub path: PathBuf,
     pub exists: bool,

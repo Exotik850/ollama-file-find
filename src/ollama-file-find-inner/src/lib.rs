@@ -11,9 +11,6 @@ pub use models::{BlobPathInfo, LayerInfo, ListedModel};
 mod scan_args;
 pub use scan_args::ScanArgs;
 
-mod media_type;
-pub use media_type::OllamaMediaType;
-
 use crate::models::{ManifestData, ModelId};
 
 /// Library wide result type.
